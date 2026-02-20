@@ -1,0 +1,7 @@
+{
+    "device_name": "fanuc_10",
+    "device_ip": "192.168.0.103",
+    "cycle":0.02,
+    "mqtt_ip": "192.168.0.250",
+    "mqtt_topic": "fanuc/10"
+}

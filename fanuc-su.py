@@ -62,7 +62,11 @@ cnc_data = {}
 
 libh = ctypes.c_ushort(0)
 
-mqttclient = mqtt.Client(device_name)
+# 兼容 paho-mqtt 2.x 的回调签名（带 CallbackAPIVersion）
+if hasattr(mqtt, "CallbackAPIVersion"):
+    mqttclient = mqtt.Client(client_id=device_name, callback_api_version=mqtt.CallbackAPIVersion.VERSION1)
+else:
+    mqttclient = mqtt.Client(client_id=device_name)
 
 # MQTT连接状态标志，用于监控连接健康状态
 _mqtt_connected = False

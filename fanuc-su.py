@@ -398,9 +398,6 @@ if __name__ == "__main__":
                 part_count = cnc_data["part_count"]
 
                 read_dynamic2()
-                absolute = cnc_data["absolute"]
-                relative = cnc_data["relative"]
-                machine = cnc_data["machine"]
 
                 read_timer()
                 timer = cnc_data["timer"]

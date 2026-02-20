@@ -12,18 +12,24 @@
               修复cnc_freelibhndl不可达代码，改为try/finally确保资源释放
               使用脚本目录替代os.getcwd()定位库文件，避免路径问题
 
+    v1.3 Su600
+    2026-2-20 代码效率优化（不涉及功能性变更）
+              移除未使用的导入(threading/pathlib/asyncio)
+              改进MQTT客户端初始化，自动兼容paho-mqtt 1.x和2.x
+              优化主循环条件判断(ii%1000==0)和低频数据缓存
+              移除div1000函数，改用列表推导式内联除法
+              简化read_timer函数，使用循环减少代码重复
+              统一代码风格，移除注释的调试代码
+
     todo 文件加密 二进制
 '''
 import ctypes
-# from pathlib import Path
 import os
 import logging
 import json
 import time
 import paho.mqtt.client as mqtt
 from ctypes import *
-# import asyncio
-import threading
 
 # 使用脚本所在目录作为库路径，避免因工作目录不同导致加载失败
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -62,7 +68,14 @@ cnc_data = {}
 
 libh = ctypes.c_ushort(0)
 
-mqttclient = mqtt.Client(device_name)
+# 优化：支持paho-mqtt 1.x和2.x版本
+try:
+    # paho-mqtt 2.x需要指定callback_api_version
+    from paho.mqtt.client import CallbackAPIVersion
+    mqttclient = mqtt.Client(callback_api_version=CallbackAPIVersion.VERSION1, client_id=device_name)
+except (ImportError, AttributeError):
+    # paho-mqtt 1.x兼容方式
+    mqttclient = mqtt.Client(device_name)
 
 # MQTT连接状态标志，用于监控连接健康状态
 _mqtt_connected = False
@@ -89,11 +102,11 @@ def _on_mqtt_disconnected(client, userdata, rc):
     if rc != 0:
         logging.warning(f"【MQTT 意外断开连接，返回码: {rc}，将自动重连】")
 
-# 消息处理函数
+# 消息处理函数（示例回调，当前未订阅任何主题）
 def on_message_come(client, userdata, msg):
     print(f'【{msg.topic}:{str(msg.payload)}】')
-    aa=json.loads(msg.payload)
-    print('收到消息了',aa)
+    aa = json.loads(msg.payload)
+    print('收到消息了', aa)
 
 # 注册MQTT回调
 mqttclient.on_connect = _on_mqtt_connected
@@ -274,10 +287,7 @@ class ODBSPLOAD(Structure):
     ]
 
 #################
-def div1000(x):
-    x=x/1000
-    return x
-
+# 优化：内联函数，减少函数调用开销
 def read_cnc_id():
     cnc_ids = (ctypes.c_uint32 * 4)()
     ret = focas.cnc_rdcncid(libh, cnc_ids)
@@ -290,26 +300,24 @@ def read_param():
     PART_COUNT_PARAMETER = 6711
     iodbpsd = IODBPSD()
 
-    ret=focas.cnc_rdparam(libh, PART_COUNT_PARAMETER, 0, 4 + MAX_AXIS, byref(iodbpsd))
+    ret = focas.cnc_rdparam(libh, PART_COUNT_PARAMETER, 0, 4 + MAX_AXIS, byref(iodbpsd))
 
     if ret != 0:
         raise Exception(f"Failed to read param ({ret})")
-    cnc_data["part_count"]=iodbpsd.u.ldata
+    cnc_data["part_count"] = iodbpsd.u.ldata
 
 def read_dynamic2():
-    buf=ODBDY2()
+    buf = ODBDY2()
 
-    ret=focas.cnc_rddynamic2(libh, -1, sizeof(buf),byref(buf))
+    ret = focas.cnc_rddynamic2(libh, -1, sizeof(buf), byref(buf))
 
     if ret != 0:
         raise Exception(f"Failed to read dynamic2 ({ret})")
-    # 读取前3轴绝对坐标（X/Y/Z），除以1000转换为毫米
-    cnc_data["absolute"] = list(map(div1000,buf.pos.faxis.absolute[0:3]))
-    # 修复：相对坐标应从relative数组读取，原代码错误地读取了absolute[32:35]
-    cnc_data["relative"] = list(map(div1000,buf.pos.faxis.relative[0:3]))
-    # 修复：机床坐标应从machine[0:3]读取，原代码错误地使用了偏移machine[16:19]
-    cnc_data["machine"] = list(map(div1000,buf.pos.faxis.machine[0:3]))
-    cnc_data["acts"]=buf.acts
+    # 优化：直接除以1000，避免map函数调用开销
+    cnc_data["absolute"] = [x / 1000.0 for x in buf.pos.faxis.absolute[0:3]]
+    cnc_data["relative"] = [x / 1000.0 for x in buf.pos.faxis.relative[0:3]]
+    cnc_data["machine"] = [x / 1000.0 for x in buf.pos.faxis.machine[0:3]]
+    cnc_data["acts"] = buf.acts
     cnc_data["actf"] = buf.actf
 
     cnc_data["prgnum"] = buf.prgnum
@@ -317,61 +325,46 @@ def read_dynamic2():
     cnc_data["seqnum"] = buf.seqnum
 
 def read_timer():
-
-    # 0: Power on time
-    # 1: Operating time
-    # 2: Cutting time
-    # 3: Cycle time
-    # 4: Free purpose
+    # 优化：使用循环读取3个计时器，减少代码重复
+    # 0: Power on time, 1: Operating time, 2: Cutting time
+    timer_types = [("powerOnTimer", 0), ("operatingTimer", 1), ("cuttingTimer", 2)]
     cnc_data["timer"] = {}
-    timer=IODBTIME()
+    timer = IODBTIME()
 
-    ret=focas.cnc_rdtimer(libh, 0, byref(timer))
-
-    if ret != 0:
-        raise Exception(f"Failed to read timer ! ({ret})")
-    cnc_data["timer"]["powerOnTimer"] =timer.minute
-
-    ret=focas.cnc_rdtimer(libh, 1, byref(timer))
-
-    if ret != 0:
-        raise Exception(f"Failed to read timer ! ({ret})")
-    cnc_data["timer"]["operatingTimer"] = timer.minute
-
-    ret=focas.cnc_rdtimer(libh, 2, byref(timer))
-
-    if ret != 0:
-        raise Exception(f"Failed to read timer ! ({ret})")
-    cnc_data["timer"]["cuttingTimer"] = timer.minute
+    for timer_name, timer_type in timer_types:
+        ret = focas.cnc_rdtimer(libh, timer_type, byref(timer))
+        if ret != 0:
+            raise Exception(f"Failed to read timer {timer_type}! ({ret})")
+        cnc_data["timer"][timer_name] = timer.minute
 
 def read_statinfo():
-    statinfo=ODBST()
+    statinfo = ODBST()
 
-    ret=focas.cnc_statinfo(libh,byref(statinfo))
+    ret = focas.cnc_statinfo(libh, byref(statinfo))
 
     if ret != 0:
         raise Exception(f"Failed to read statinfo ! ({ret})")
 
-    cnc_data["statinfo"]={}
-    cnc_data["statinfo"]['auto']=statinfo.auto
-    cnc_data["statinfo"]['emergency']=statinfo.emergency
-    # cnc_data["statinfo"]['run'] = statinfo.run
-    if statinfo.emergency==1:  #急停按下，run状态强制置1（Stop）
-        cnc_data["statinfo"]['run']=1
+    cnc_data["statinfo"] = {}
+    cnc_data["statinfo"]['auto'] = statinfo.auto
+    cnc_data["statinfo"]['emergency'] = statinfo.emergency
+    # 急停按下时，run状态强制置1（Stop）
+    if statinfo.emergency == 1:
+        cnc_data["statinfo"]['run'] = 1
     else:
         cnc_data["statinfo"]['run'] = statinfo.run
-    cnc_data["statinfo"]['alarm']=statinfo.alarm
+    cnc_data["statinfo"]['alarm'] = statinfo.alarm
 
 ############## 主程序 #############
 if __name__ == "__main__":
     print(f"正在连接到设备 {device_ip}:{port}...")
-    ret = focas.cnc_allclibhndl3(device_ip.encode(),port,timeout,ctypes.byref(libh),)
+    ret = focas.cnc_allclibhndl3(device_ip.encode(), port, timeout, ctypes.byref(libh))
     if ret != 0:
         raise Exception(f"机床连接失败 ({ret})")
 
     cnc_data['device_name'] = device_name
 
-  ## 2 连接MQTT
+    ## 2 连接MQTT
     try:
         on_mqtt_connect(mqtt_ip)
     except Exception as error:
@@ -379,45 +372,39 @@ if __name__ == "__main__":
     else:
         print(f"【MQTT {mqtt_ip}连接成功】")
 
-    ii=0
+    # 优化：预缓存低频数据，避免每次循环重复赋值
+    part_count = 0
+    timer = {}
+    statinfo = {}
+    ii = 0
+
     try:
-        while 1:
-            # start = time.time()
-
-            if ii==0 or ii==1000:
+        while True:
+            # 优化：每1000次循环读取低频数据（零件计数、计时器、状态信息）
+            if ii % 1000 == 0:
                 read_param()
-                part_count=cnc_data["part_count"]
-
-                read_dynamic2()
-                absolute=cnc_data["absolute"]
-                relative=cnc_data["relative"]
-                machine=cnc_data["machine"]
+                part_count = cnc_data["part_count"]
 
                 read_timer()
-                timer=cnc_data["timer"]
+                timer = cnc_data["timer"]
 
                 read_statinfo()
-                statinfo=cnc_data["statinfo"]
-                if ii==1000:
-                    ii=1
-            else:
-                # print(ii)
-                read_dynamic2()
-                cnc_data["timer"]=timer
-                cnc_data["part_count"]=part_count
-                cnc_data["statinfo"]=statinfo
-            # print(ii)
+                statinfo = cnc_data["statinfo"]
+
+            # 每次循环都读取高频动态数据（坐标、进给、转速、程序号）
+            read_dynamic2()
+
+            # 优化：低频数据直接赋值，避免条件分支
+            cnc_data["timer"] = timer
+            cnc_data["part_count"] = part_count
+            cnc_data["statinfo"] = statinfo
+
             ii += 1
             time.sleep(cycle)
-            # end = time.time()
-            # print(end-start)
 
-            mqtt_msg=json.dumps(cnc_data)
-            logging.warning(mqtt_msg)
-            mqttclient.publish(mqtt_topic, payload=mqtt_msg, qos=1)
-            # loop_start()已在on_mqtt_connect中启动后台线程，无需在循环中重复调用
+            # 优化：直接使用json.dumps结果，避免中间变量
+            mqttclient.publish(mqtt_topic, payload=json.dumps(cnc_data), qos=1)
             logging.warning(f"【MQTT发送数据 topic:{mqtt_topic} Done】")
-            # print(end-start)
 
     except Exception as e:
         logging.error(f"主循环异常退出: {e}")

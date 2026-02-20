@@ -414,14 +414,23 @@ if __name__ == "__main__":
             # 每FULL_DATA_CYCLE次循环进行一次完整数据采集
             if iteration_count == 0 or iteration_count == FULL_DATA_CYCLE:
                 read_param()
+                part_count = cnc_data["part_count"]
+
                 read_dynamic2()
+
                 read_timer()
+                timer = cnc_data["timer"]
+
                 read_statinfo()
+                statinfo = cnc_data["statinfo"]
                 if iteration_count == FULL_DATA_CYCLE:
                     iteration_count = 1
             else:
                 # 高频采集：只读取动态数据，复用上次的timer、part_count、statinfo
                 read_dynamic2()
+                cnc_data["timer"] = timer
+                cnc_data["part_count"] = part_count
+                cnc_data["statinfo"] = statinfo
 
             iteration_count += 1
             time.sleep(cycle)

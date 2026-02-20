@@ -4,13 +4,14 @@
     1-10 恢复设置里的cycle参数
 
     v1.2 Su600
-    2026-2-20 修复相对坐标与机床坐标读取索引错误(relative[0:3]/machine[0:3])
+    2026-2-20 修复相对坐标读取索引错误(relative[0:3])
               修复ODBACT结构体字段定义错误(dummp应为c_short*2)
               修复cnc_startupprocess字符串未编码问题
               移除主循环中的重复loop_start调用
               增加CNC/MQTT断线重连机制，提升长期运行稳定性
               修复cnc_freelibhndl不可达代码，改为try/finally确保资源释放
               使用脚本目录替代os.getcwd()定位库文件，避免路径问题
+              机床坐标使用测试验证的索引machine[16:19]
 
     todo 文件加密 二进制
 '''
@@ -332,8 +333,8 @@ def read_dynamic2():
     cnc_data["absolute"] = list(map(div1000, buf.pos.faxis.absolute[0:3]))
     # 修复：相对坐标应从relative数组读取，原代码错误地读取了absolute[32:35]
     cnc_data["relative"] = list(map(div1000, buf.pos.faxis.relative[0:3]))
-    # 修复：机床坐标应从machine[0:3]读取，原代码错误地使用了偏移machine[16:19]
-    cnc_data["machine"] = list(map(div1000, buf.pos.faxis.machine[0:3]))
+    # 机床坐标从machine[16:19]读取（已实际测试验证的索引）
+    cnc_data["machine"] = list(map(div1000, buf.pos.faxis.machine[16:19]))
     cnc_data["acts"] = buf.acts
     cnc_data["actf"] = buf.actf
 

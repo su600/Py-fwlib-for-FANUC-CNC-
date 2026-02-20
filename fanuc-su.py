@@ -12,6 +12,12 @@
               修复cnc_freelibhndl不可达代码，改为try/finally确保资源释放
               使用脚本目录替代os.getcwd()定位库文件，避免路径问题
 
+    v1.3 Su600
+    2026-2-20 兼容paho-mqtt 2.x（CallbackAPIVersion）
+              移除未使用的threading导入
+              主程序中调用read_cnc_id()填充machine_id字段
+              on_message_come增加JSON解析异常保护
+
     todo 文件加密 二进制
 '''
 import ctypes
@@ -23,7 +29,6 @@ import time
 import paho.mqtt.client as mqtt
 from ctypes import *
 # import asyncio
-import threading
 
 # 使用脚本所在目录作为库路径，避免因工作目录不同导致加载失败
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -62,7 +67,14 @@ cnc_data = {}
 
 libh = ctypes.c_ushort(0)
 
-mqttclient = mqtt.Client(device_name)
+# paho-mqtt 2.x 要求显式传入 callback_api_version，1.x 无此参数
+if hasattr(mqtt, 'CallbackAPIVersion'):
+    mqttclient = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+        client_id=device_name
+    )
+else:
+    mqttclient = mqtt.Client(device_name)
 
 # MQTT连接状态标志，用于监控连接健康状态
 _mqtt_connected = False
@@ -92,8 +104,11 @@ def _on_mqtt_disconnected(client, userdata, rc):
 # 消息处理函数
 def on_message_come(client, userdata, msg):
     print(f'【{msg.topic}:{str(msg.payload)}】')
-    aa=json.loads(msg.payload)
-    print('收到消息了',aa)
+    try:
+        aa = json.loads(msg.payload)
+        print('收到消息了', aa)
+    except json.JSONDecodeError as e:
+        logging.warning(f"【消息JSON解析失败: {e}】")
 
 # 注册MQTT回调
 mqttclient.on_connect = _on_mqtt_connected
@@ -370,14 +385,15 @@ if __name__ == "__main__":
         raise Exception(f"机床连接失败 ({ret})")
 
     cnc_data['device_name'] = device_name
+    read_cnc_id()
 
-  ## 2 连接MQTT
+    ## 2 连接MQTT
     try:
         on_mqtt_connect(mqtt_ip)
     except Exception as error:
         print(f"MQTT连接错误 \n{error}")
     else:
-        print(f"【MQTT {mqtt_ip}连接成功】")
+        print(f"【MQTT {mqtt_ip} 连接请求已发起，等待回调确认】")
 
     ii=0
     try:

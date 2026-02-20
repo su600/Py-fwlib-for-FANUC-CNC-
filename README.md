@@ -45,9 +45,13 @@
 ## 环境要求
 
 - Python 3.9+
-- Linux x86（需匹配 `libfwlib32.so` 的目标架构）
+- **Linux x86（仅支持 x86/x86-64，不支持 ARM 架构）**  
+  `libfwlib32.so` 是针对 x86 平台编译的共享库，无法在树莓派、ARM 服务器等 ARM 设备上运行。
 - FANUC 数控系统支持 FOCAS2 以太网连接（端口 8193）
-- MQTT Broker（如 Mosquitto）
+- MQTT Broker（推荐使用 [EMQX](https://www.emqx.io/)，也支持 Mosquitto 等标准 MQTT Broker）
+
+> **EMQX** 是企业级开源 MQTT Broker，支持高并发、集群部署，社区版完全免费，适合工业物联网场景。  
+> 安装参考：https://www.emqx.io/docs/zh/latest/deploy/install.html
 
 ---
 
@@ -84,7 +88,7 @@ pip install -r requirements.txt
 |------|------|
 | `device_name` | 设备唯一名称，同时作为 MQTT 客户端 ID |
 | `device_ip` | FANUC 机床 IP 地址 |
-| `cycle` | 高频采集间隔（秒），默认 0.02（50Hz） |
+| `cycle` | 高频采集间隔（秒），默认 0.02。注意：每次循环本身也有执行耗时，实际采集频率会低于 1/cycle（例如 cycle=0.02 时理论值 50Hz，实际约 40~45Hz） |
 | `mqtt_ip` | MQTT Broker IP 地址 |
 | `mqtt_topic` | 数据发布的 MQTT 主题 |
 
@@ -108,13 +112,13 @@ chmod +x RunPython.sh
 ### 构建镜像
 
 ```bash
-docker build -t fanuc-collector .
+docker build -t fanuc-collector:1.0 .
 ```
 
 ### 运行容器
 
 ```bash
-docker run -d --name fanuc-collector fanuc-collector
+docker run -d --name fanuc-collector fanuc-collector:1.0
 ```
 
 ### 查看日志
@@ -157,6 +161,11 @@ docker logs -f fanuc-collector
 - **新增**：`requirements.txt` 依赖文件
 - **新增**：`README.md` 使用文档
 - **更新**：`Dockerfile` 升级基础镜像至 `python:3.11-slim-bookworm`，改用 `requirements.txt` 安装依赖
+
+  > **为什么从 bullseye 改为 bookworm？**  
+  > `bullseye` 是 Debian 11（2021年发布），已进入维护末期；`bookworm` 是 Debian 12（2023年发布），系统库更新、安全补丁更活跃，glibc 版本更高（2.36 vs 2.31），与较新版 FOCAS 库兼容性更好。  
+  > Python 版本也同步升级为 3.11（更快、更稳定）。  
+  > **预估镜像大小**：`python:3.11-slim-bookworm` 基础约 45MB，加上 paho-mqtt 后整体约 50~55MB。
 
 ### v1.1（2023-01-10）
 

@@ -130,8 +130,32 @@ def create_mqtt_client(client_id):
     else:
         return mqtt.Client(client_id)
 
-mqttclient = create_mqtt_client(device_name)
 
+class LazyMQTTClient:
+    """
+    延迟创建实际的MQTT客户端实例，避免在模块导入时就执行连接相关初始化。
+
+    当首次访问任何属性或方法时，才创建底层的 mqtt.Client 实例。
+    这样可以确保 MQTT 客户端的创建发生在日志系统配置之后。
+    """
+
+    def __init__(self, client_id):
+        self._client_id = client_id
+        self._client = None
+
+    def _ensure_client(self):
+        if self._client is None:
+            self._client = create_mqtt_client(self._client_id)
+
+    def __getattr__(self, name):
+        """
+        将属性访问转发到底层的 mqtt.Client 实例。
+        """
+        self._ensure_client()
+        return getattr(self._client, name)
+
+
+mqttclient = LazyMQTTClient(device_name)
 # 连接MQTT服务器
 def on_mqtt_connect(client, userdata, flags, rc):
     """

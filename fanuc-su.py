@@ -572,7 +572,7 @@ if __name__ == "__main__":
 
         while running:
             try:
-                # 使用模ulo运算符优化循环逻辑
+                # 使用模运算符优化循环逻辑
                 # 每1000次(约1分钟)采集一次低频数据
                 if ii % LOW_FREQ_INTERVAL == 0:
                     read_param()
